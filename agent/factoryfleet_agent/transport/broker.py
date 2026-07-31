@@ -34,7 +34,12 @@ DEFAULT_QOS = 1
 
 
 class BrokerClient(Protocol):
-    """What the publisher needs from a broker connection."""
+    """What the agent needs from a broker connection."""
+
+    def start(self) -> None:
+        """Begins connecting. Must not block on, or fail because of, an absent broker."""
+
+    def stop(self) -> None: ...
 
     def is_connected(self) -> bool: ...
 
