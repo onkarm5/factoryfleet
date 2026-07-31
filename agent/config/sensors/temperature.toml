@@ -1,0 +1,18 @@
+# Temperature sensor — bearing and spindle. Heat is the second classic degradation signal:
+# friction from a failing bearing shows up as a slow rise long before seizure.
+
+sensor_id = "temperature"
+type = "temperature"
+enabled = true
+
+[options]
+# Steady-state temperatures for this machine under normal load, in Celsius.
+baseline_bearing_c = 68.0
+baseline_spindle_c = 55.0
+# Reading-to-reading spread.
+noise_c = 1.2
+# Degrees per hour of runtime added to the bearing reading. Non-zero simulates a bearing
+# heating up; pairs with the vibration drift knob to produce a realistic failure.
+drift_c_per_hour = 0.0
+# Absolute bearing limit. Past this the machine is CRITICAL.
+hard_limit_bearing_c = 95.0

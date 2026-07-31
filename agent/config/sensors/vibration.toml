@@ -1,0 +1,23 @@
+# Vibration sensor — the primary predictive-maintenance signal on rotating machinery.
+# Climbing RMS velocity is how a failing bearing or a loosening mount announces itself,
+# usually well before anything trips a hard limit.
+
+sensor_id = "vibration"
+type = "vibration"
+enabled = true
+
+[options]
+# Millimetres per second RMS this machine reads when healthy. Machine-specific: a press
+# that has always run at 4 mm/s is not comparable to one that has always run at 7.
+baseline_rms_mm_s = 4.2
+# Cycle-to-cycle spread around the baseline.
+noise_mm_s = 0.30
+# Raise above zero to simulate progressive degradation, in mm/s added per hour of
+# runtime. This is the knob that produces a drifting machine for the anomaly detector to
+# catch while readings are still inside hard_limit_rms_mm_s.
+drift_mm_s_per_hour = 0.0
+# Peak velocity is reported as a multiple of RMS. Real crest factors sit near 2.5 for
+# healthy rotating equipment and climb as bearing damage develops.
+peak_factor = 2.5
+# Absolute limit. A reading past this is CRITICAL regardless of the machine's baseline.
+hard_limit_rms_mm_s = 15.0

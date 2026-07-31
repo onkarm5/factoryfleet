@@ -1,0 +1,44 @@
+# Asset agent configuration.
+#
+# One agent process runs per machine. Everything specific to a single sensor lives in
+# config/sensors/<name>.toml instead, so a sensor can be added or retuned without touching
+# this file.
+
+[asset]
+# Identity this agent reports under. site_id and asset_id together address the machine:
+# they form its MQTT topic prefix and its key in the backend registry.
+site_id = "PLANT-A"
+asset_id = "PRESS-01"
+# One of: CNC_MILL, HYDRAULIC_PRESS, CONVEYOR, ROBOT_ARM, INJECTION_MOLDER
+machine_type = "HYDRAULIC_PRESS"
+firmware_version = "2.4.1"
+
+[broker]
+# Local Mosquitto for development. Milestone 3 points this at AWS IoT Core on 8883 with
+# tls = true and a per-asset client certificate.
+host = "localhost"
+port = 1883
+tls = false
+keepalive_seconds = 30
+# MQTT client id. Left empty it defaults to the asset id, which is what IoT Core expects
+# (its policies are written against the client id).
+client_id = ""
+
+[sampling]
+# How often every enabled sensor is read.
+interval_seconds = 10.0
+
+[publishing]
+# How often the outbox is drained to the broker. Deliberately slower than sampling so
+# readings batch up rather than costing one round trip each.
+interval_seconds = 15.0
+# Most readings sent in one publish. Bounds message size on a slow link.
+batch_size = 50
+
+[storage]
+# SQLite file holding latest state and the pending-publish outbox. Relative paths resolve
+# against the agent directory.
+database_path = "data/agent.sqlite"
+
+[logging]
+level = "INFO"

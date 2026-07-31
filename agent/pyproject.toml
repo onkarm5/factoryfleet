@@ -1,0 +1,11 @@
+[project]
+name = "factoryfleet-agent"
+version = "0.2.0"
+description = "FactoryFleet asset agent — samples a plant-floor machine's sensors and reports them to the cloud"
+requires-python = ">=3.11"
+dependencies = ["paho-mqtt==2.1.0"]
+
+[tool.pytest.ini_options]
+# Run pytest from the agent directory; this puts the package on the path without an install.
+pythonpath = ["."]
+testpaths = ["tests"]

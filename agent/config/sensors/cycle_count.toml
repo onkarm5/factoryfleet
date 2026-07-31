@@ -1,0 +1,15 @@
+# Production counter — cycles completed and agent uptime.
+#
+# Not a health signal on its own: it is the denominator. Vibration at 6 mm/s means one thing
+# on a machine that has run 400 cycles and another on one that has run 4 million, and a
+# stalled counter on a machine that should be running is itself worth seeing.
+
+sensor_id = "cycle_count"
+type = "cycle_count"
+enabled = true
+
+[options]
+# Nominal production rate for this machine.
+cycles_per_minute = 42.0
+# Spread in the per-interval count, so the counter does not advance unrealistically evenly.
+jitter_cycles = 3.0
