@@ -22,6 +22,10 @@ from factoryfleet_agent.sensors.simulation import SimulatedSensor
 
 SECONDS_PER_MINUTE = 60.0
 
+#: Shortest window from which a rate is estimated directly. One second of a machine running at
+#: production speed is enough cycles to divide by; a millisecond is not.
+MIN_RATE_WINDOW_MINUTES = 1.0 / SECONDS_PER_MINUTE
+
 
 @register("cycle_count")
 class CycleCountSensor(SimulatedSensor):
@@ -56,9 +60,28 @@ class CycleCountSensor(SimulatedSensor):
         produced = max(0.0, produced)
         self._cycles_total += int(round(produced))
 
-        observed_rate = produced / minutes if minutes > 0 else 0.0
+        uptime_seconds = self.elapsed_seconds()
         return {
             "cycles_total": self._cycles_total,
-            "cycles_per_minute": round(observed_rate, 2),
-            "uptime_seconds": round(self.elapsed_seconds(), 1),
+            "cycles_per_minute": round(self._rate(produced, minutes, uptime_seconds), 2),
+            "uptime_seconds": round(uptime_seconds, 1),
         }
+
+    def _rate(self, produced: float, minutes: float, uptime_seconds: float) -> float:
+        """Cycles per minute, estimated over a window long enough for the answer to mean something.
+
+        A rate is a count divided by a window, so as the window shrinks the division amplifies
+        whatever noise the count carries. On the first sample the window is effectively zero
+        and the result is meaningless — this used to report 470 cycles/min for a machine
+        holding a steady 42, alongside a total of 0.
+
+        Below the minimum window it falls back to the long-run average over total runtime,
+        which is a real measurement rather than an invented one, and which is 0 on the very
+        first sample where nothing has been produced yet.
+        """
+        if minutes >= MIN_RATE_WINDOW_MINUTES:
+            return produced / minutes
+        uptime_minutes = uptime_seconds / SECONDS_PER_MINUTE
+        if uptime_minutes > 0:
+            return self._cycles_total / uptime_minutes
+        return 0.0

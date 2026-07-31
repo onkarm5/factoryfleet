@@ -318,6 +318,32 @@ def test_the_cycle_total_stays_unbiased_regardless_of_sampling_interval():
         assert total == pytest.approx(2520, rel=0.02), interval_seconds
 
 
+def test_the_first_reading_does_not_report_an_absurd_rate():
+    """Dividing a jittered count by a near-zero window used to report 470 cycles/min at 42.
+
+    The first sample of every agent start hits this, so it is the reading most likely to be
+    seen and the one that would make the whole simulation look broken.
+    """
+    reading = cycle_count().sample()
+
+    assert reading.metrics["uptime_seconds"] == 0.0
+    assert reading.metrics["cycles_total"] == 0
+    assert reading.metrics["cycles_per_minute"] == 0.0
+
+
+def test_a_window_too_short_to_estimate_from_falls_back_to_the_long_run_average():
+    clock = MutableClock()
+    sensor = cycle_count(clock, jitter_cycles=0.0)
+
+    clock.advance(minutes=10)
+    sensor.sample()  # 420 cycles over 10 minutes
+
+    clock.advance(milliseconds=1)  # far too short a window to divide by
+    rate = sensor.sample().metrics["cycles_per_minute"]
+
+    assert rate == pytest.approx(42.0, rel=0.01)
+
+
 def test_a_sample_with_no_elapsed_time_reports_a_zero_rate_and_no_new_cycles():
     """Two samples in the same instant must not invent production."""
     sensor = cycle_count(jitter_cycles=0.0)
