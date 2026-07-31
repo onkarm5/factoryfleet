@@ -17,6 +17,10 @@ from factoryfleet_agent.sensors.base import (
     registered_types,
 )
 
+# Imported for the registration side effect: each module calls @register at import time, so
+# a configured sensor type resolves without anything holding a hard-coded list of modules.
+from factoryfleet_agent.sensors import cycle_count, temperature, vibration  # noqa: F401,E402
+
 __all__ = [
     "Reading",
     "Sensor",

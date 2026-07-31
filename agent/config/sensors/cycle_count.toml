@@ -11,5 +11,7 @@ enabled = true
 [options]
 # Nominal production rate for this machine.
 cycles_per_minute = 42.0
-# Spread in the per-interval count, so the counter does not advance unrealistically evenly.
+# Spread in production rate, in cycles per minute, so the counter does not advance
+# unrealistically evenly. Scaled by the square root of the sampling interval, so changing
+# how often the agent samples does not change how noisy the reported rate looks.
 jitter_cycles = 3.0
