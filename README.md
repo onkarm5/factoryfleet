@@ -55,16 +55,45 @@ backend deploy or restart never drops plant-floor telemetry.
 | `agent/` | Python agent that runs on (or simulates) a machine and publishes telemetry |
 | `backend/` | Spring Boot service — asset registry, telemetry ingestion, command dispatch |
 | `infra/terraform/` | Terraform for IoT Core, RDS, ECS, SQS, SNS |
+| `infra/mosquitto/` | Local broker config, standing in for IoT Core during development |
+| `docker-compose.yml` | Local development dependencies |
 | `docs/` | [Functional and technical specification](docs/SPEC.md) |
 
 ## Tech stack
 
-**Agent** — Python 3.11, `paho-mqtt` / AWS IoT Device SDK, SQLite, `psutil`
+**Agent** — Python 3.11, `paho-mqtt`, SQLite
 **Backend** — Java 21, Spring Boot 3.5, Spring Data JPA, PostgreSQL
 **Infrastructure** — AWS IoT Core, SQS, RDS Postgres, ECS Fargate, SNS, Terraform
 **Tooling** — Docker Compose for local development, GitHub Actions for CI
 
 ## Getting started
+
+### Agent
+
+Requires Python 3.11+ and Docker. Mosquitto stands in for AWS IoT Core, so this runs the whole
+agent pipeline with no AWS account and no cost.
+
+```bash
+docker compose up -d mosquitto
+```
+
+```bash
+cd agent
+python3.11 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m factoryfleet_agent
+```
+
+Watch what reaches the broker:
+
+```bash
+docker exec factoryfleet-mosquitto mosquitto_sub -h localhost -t 'factoryfleet/#' -v
+```
+
+Kill the broker while the agent runs and the readings queue in SQLite instead of being lost;
+bring it back and they publish in order. See [`agent/README.md`](agent/README.md) for
+configuration, the payload format, how to add a sensor, and how to simulate a degrading
+machine.
 
 ### Backend
 
@@ -114,7 +143,7 @@ No AWS resources are defined yet, so nothing is created and nothing is billed. S
 | # | Milestone | Status |
 |---|---|---|
 | 1 | Repository scaffold, specification, backend skeleton, asset registry API, Terraform baseline | ✅ done |
-| 2 | Python agent — sensor plugins, scheduler, local SQLite outbox, MQTT publish to a local broker | planned |
+| 2 | Python agent — sensor plugins, scheduler, local SQLite outbox, MQTT publish to a local broker | ✅ done |
 | 3 | AWS IoT Core — X.509 provisioning, Rules Engine, SQS telemetry queue in Terraform | planned |
 | 4 | Backend telemetry ingestion — SQS consumer, RDS Postgres persistence | planned |
 | 5 | Remote commands — REST → IoT publish → agent executes → result → backend command log | planned |

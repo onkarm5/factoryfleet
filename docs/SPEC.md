@@ -149,13 +149,51 @@ An asset's IoT policy permits publish and subscribe only on topics containing it
 {
   "assetId": "PRESS-01",
   "siteId": "PLANT-A",
-  "sentAt": "2026-07-30T04:15:02Z",
+  "batchedAt": "2026-07-30T04:15:00.168Z",
+  "sentAt": "2026-07-30T04:15:02.052Z",
   "readings": [
-    { "sensorId": "vibration",   "capturedAt": "2026-07-30T04:15:00Z", "metrics": { "rms_mm_s": 4.7, "peak_mm_s": 11.2 } },
-    { "sensorId": "temperature", "capturedAt": "2026-07-30T04:15:00Z", "metrics": { "bearing_c": 71.5 } }
+    { "sensorId": "vibration",   "capturedAt": "2026-07-30T04:15:00.168Z", "condition": "OK",
+      "metrics": { "rms_mm_s": 4.7, "peak_mm_s": 11.2 } },
+    { "sensorId": "temperature", "capturedAt": "2026-07-30T04:15:00.168Z", "condition": "OK",
+      "metrics": { "bearing_c": 71.5, "spindle_c": 55.2 } }
   ]
 }
 ```
+
+A reading that could not be taken carries `"condition": "ERROR"` and an `error` field
+describing the failure, with no metrics.
+
+Asset and site are repeated in the body although they are already in the topic: once messages
+are routed through a queue the topic is no longer attached to them, and a reading that cannot
+say which machine produced it is useless.
+
+#### The three timestamps
+
+| Field | Set by | Meaning |
+|---|---|---|
+| `capturedAt` | the sensor | when the measurement was taken |
+| `batchedAt` | the agent's sampling cycle | when the batch was committed to the outbox |
+| `sentAt` | the publisher, at publish time | when the batch actually left the agent |
+
+`sentAt` is stamped when the message is sent rather than when it is queued, because a batch may
+sit in the outbox for hours while a link is down. Its difference from `batchedAt` is therefore
+how long the agent could not reach the broker — a figure otherwise invisible from the cloud,
+where telemetry buffered through an outage is indistinguishable from telemetry produced late.
+
+### Reading conditions
+
+The agent judges each reading locally, and its vocabulary is deliberately narrower than the
+asset health states in §2:
+
+| Condition | Meaning |
+|---|---|
+| `OK` | Within the sensor's configured limits. |
+| `CRITICAL` | A hard limit was breached (FR-12). Actionable with no further analysis. |
+| `ERROR` | The sensor could not be read. Says nothing about the machine's condition. |
+
+There is no agent-side `DEGRADED`. The agent sees one reading at a time, so it can judge a
+fixed limit but not drift away from a machine's learned baseline; that requires history across
+readings and belongs to the backend (FR-11).
 
 ### Command payload
 
@@ -190,9 +228,23 @@ Base path `/api/v1`. Operator endpoints are scoped by site.
 ### Agent — local SQLite
 
 ```sql
-asset_state(sensor_id TEXT PRIMARY KEY, condition TEXT, metrics_json TEXT, captured_at TEXT)
-outbox(id INTEGER PRIMARY KEY, topic TEXT, payload_json TEXT, created_at TEXT, published_at TEXT)
+asset_state(sensor_id TEXT PRIMARY KEY, condition TEXT, metrics_json TEXT, error TEXT,
+            captured_at TEXT)
+outbox(id INTEGER PRIMARY KEY AUTOINCREMENT, topic TEXT, payload_json TEXT, created_at TEXT,
+       published_at TEXT)
 ```
+
+`asset_state` holds one row per sensor, overwritten each cycle: the machine's condition now,
+which is what a `get_status` command answers from without waiting for the next sample.
+
+`outbox` is the durability boundary. A row is written before any publish is attempted and
+`published_at` is set only on broker confirmation, which makes delivery at-least-once — a crash
+between publishing and confirming resends rather than drops. Confirmed rows are pruned on a
+retention window rather than deleted immediately, because when telemetry looks wrong in the
+cloud the first question is what the agent actually sent. The table is capped; past the cap the
+oldest unpublished rows are dropped and counted, since an operator restoring a link after two
+days wants the machine's state now, and silent loss would be indistinguishable from a healthy
+quiet machine.
 
 ### Backend — PostgreSQL *(milestone 4)*
 
@@ -207,24 +259,43 @@ alert(id, asset_id_fk, kind, severity, detail, opened_at, closed_at)
 
 ## 8. Agent design
 
+Implemented under `agent/factoryfleet_agent/`.
+
 | Module | Responsibility |
 |---|---|
-| `config.py` | Load agent and sensor configuration files |
+| `main.py` | CLI, logging, signal handling |
+| `agent.py` | Wires the subsystems and owns their lifecycle |
+| `config.py` | Load and validate agent and sensor configuration files |
 | `scheduler.py` | Interval ticker driving each sampling cycle |
 | `sensors/base.py` | `Sensor` abstract base, `@register("type")` decorator, `Reading` value object |
+| `sensors/simulation.py` | Baseline, noise, and drift shared by the simulated sensors |
 | `sensors/vibration.py` | Vibration RMS and peak |
 | `sensors/temperature.py` | Bearing and spindle temperature |
-| `sensors/cycle_count.py` | Production cycles and machine uptime |
-| `runner.py` | Instantiate configured sensors, run the sampling cycle, write state and outbox |
+| `sensors/cycle_count.py` | Production cycles, rate, and machine uptime |
+| `runner.py` | Run the sampling cycle, write state and outbox in one transaction |
 | `store.py` | SQLite `asset_state` and `outbox` access |
-| `transport/publisher.py` | Drain outbox to MQTT, delete only on broker confirmation |
-| `transport/subscriber.py` | Receive commands, hand to dispatcher |
-| `commands/dispatcher.py` | Route `sensor:<id>` to a sensor, bare names to global handlers |
-| `commands/handlers/` | `get_status`, `run_diagnostic`, `reload_config`, `restart_agent` |
+| `wire.py` | Topic names and payload shapes |
+| `timeutil.py` | UTC formatting shared by the store and the wire format |
+| `transport/broker.py` | `BrokerClient` protocol and its MQTT implementation |
+| `transport/publisher.py` | Drain outbox to MQTT, confirm before forgetting |
+| `transport/subscriber.py` | Receive commands, hand to dispatcher *(milestone 5)* |
+| `commands/dispatcher.py` | Route `sensor:<id>` to a sensor, bare names to global handlers *(milestone 5)* |
+| `commands/handlers/` | `get_status`, `run_diagnostic`, `reload_config`, `restart_agent` *(milestone 5)* |
 
-Sensors are simulated by default so the fleet can be demonstrated without physical hardware;
-each simulated sensor produces a realistic waveform with configurable drift, which is what
-exercises the anomaly detector.
+Two schedulers drive the agent — one sampling, one publishing — sharing nothing but the store.
+That decoupling is what lets a broker outage stall publishing without stopping measurement: the
+sampler holds no connection, so it cannot be blocked by one.
+
+Sensors are simulated by default so the fleet can be demonstrated without physical hardware.
+Each simulated reading is a machine-specific baseline plus cycle-to-cycle noise plus optional
+drift, rather than a flat random value — a distinction that matters, because random values
+would make the anomaly detector appear to work when it does not. With drift enabled a machine
+climbs from 4.2 to roughly 8.9 mm/s over twelve hours while every reading stays far below the
+15 mm/s hard limit, which is precisely the window §10 exists to catch.
+
+The base class owns timestamping and error handling rather than each sensor: `read()` may raise
+freely and the base turns the failure into an `ERROR` reading, so one seized sensor cannot end a
+cycle and take its healthy neighbours with it.
 
 ## 9. Backend design
 
@@ -264,9 +335,15 @@ per-sensor hard limit.
 
 ## 12. Local development
 
-Milestone 2 runs the whole pipeline without AWS: a Mosquitto broker in Docker Compose stands
-in for IoT Core, and the backend reads from a local queue. Milestone 3 switches the agent's
-transport to IoT Core; the agent's own logic does not change.
+Milestone 2 runs the agent without AWS: a Mosquitto broker in Docker Compose stands in for IoT
+Core. Both speak MQTT, so only addressing and authentication differ — milestone 3 switches the
+transport to IoT Core by replacing `transport/broker.py`, and the agent's own logic does not
+change.
+
+The development broker runs with `persistence false` and anonymous access. Anonymous access
+would be indefensible anywhere else, but this broker is bound to a developer's machine and holds
+nothing; the real access model is §11. Persistence is off deliberately: the durability that
+matters is the agent's outbox, and a broker that forgets on restart is a useful test of it.
 
 ## 13. Delivery milestones
 
