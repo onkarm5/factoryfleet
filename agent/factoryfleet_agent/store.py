@@ -261,6 +261,12 @@ class Store:
             ).fetchone()
         return int(row["pending"])
 
+    def outbox_size(self) -> int:
+        """All outbox rows, including confirmed ones not yet pruned — what is on disk."""
+        with self._lock:
+            row = self._connection.execute("SELECT COUNT(*) AS total FROM outbox").fetchone()
+        return int(row["total"])
+
     def mark_published(self, entry_ids: Sequence[int]) -> int:
         """Confirms delivery. Only ever called once the broker has acknowledged."""
         if not entry_ids:

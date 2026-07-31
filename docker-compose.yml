@@ -1,0 +1,25 @@
+# Local development stand-in for AWS IoT Core.
+#
+# Both are MQTT brokers, so the agent's publishing logic is identical against either; what
+# differs is addressing and authentication. Milestone 3 points the agent at IoT Core with a
+# per-asset X.509 certificate. Until then this runs the whole pipeline with no AWS account,
+# no certificates, and no cost.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: factoryfleet-mosquitto
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # MQTT over WebSocket, for browser-based inspection
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      # Publishing to the broker's own client is the only check that proves it is actually
+      # accepting connections rather than merely running.
+      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "healthcheck", "-m", "ok", "-q", "1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
