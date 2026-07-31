@@ -15,19 +15,28 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from threading import RLock
 from typing import Any, Callable, Iterable, Mapping
 
 from factoryfleet_agent.config import SensorConfig
+from factoryfleet_agent.timeutil import Clock, iso, utc_now
 
-# Returns the current instant. Injected so tests can drive time instead of sleeping.
-Clock = Callable[[], datetime]
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+__all__ = [
+    "Clock",
+    "Reading",
+    "Sensor",
+    "SensorCondition",
+    "SensorError",
+    "UnknownCommand",
+    "UnknownSensorType",
+    "create",
+    "create_all",
+    "register",
+    "registered_types",
+    "utc_now",
+]
 
 
 class SensorCondition(str, Enum):
@@ -76,7 +85,7 @@ class Reading:
         """Renders the reading as it travels on the wire."""
         payload: dict[str, Any] = {
             "sensorId": self.sensor_id,
-            "capturedAt": _iso(self.captured_at),
+            "capturedAt": iso(self.captured_at),
             "condition": self.condition.value,
             "metrics": dict(self.metrics),
         }
@@ -233,14 +242,3 @@ def _describe(error: Exception) -> str:
     message = str(error).strip()
     name = type(error).__name__
     return f"{name}: {message}" if message else name
-
-
-def _iso(moment: datetime) -> str:
-    """ISO-8601 in UTC with a trailing Z, which is what the backend parses."""
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return (
-        moment.astimezone(timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
