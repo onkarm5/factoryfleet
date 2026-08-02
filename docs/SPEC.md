@@ -141,7 +141,16 @@ trend charts beyond the raw reading API, and horizontal scaling of the backend b
 | `factoryfleet/{siteId}/{assetId}/commands/result` | agent → cloud | completion or error |
 
 An asset's IoT policy permits publish and subscribe only on topics containing its own
-`assetId`.
+`assetId`, and permits `iot:Connect` only with a client id equal to that `assetId`, so a
+stolen certificate cannot be used to connect as a different machine. `iot:Subscribe` and
+`iot:Receive` are granted separately because IoT Core authorises them separately — granting
+only the first produces a subscription that silently delivers nothing.
+
+The Rules Engine adds one field the device does not control:
+
+| Field | Source | Why |
+|---|---|---|
+| `ingestedAt` | `timestamp()` in the rule's SQL, epoch milliseconds | Every other timestamp comes from the machine, and machine clocks drift, get reset, and occasionally lie by years. One broker-stamped time makes that detectable. |
 
 ### Telemetry payload
 
@@ -324,9 +333,22 @@ per-sensor hard limit.
 
 ## 11. Security
 
-- Per-asset X.509 certificate; IoT policy scoped to that asset's own topic prefix.
+- Per-asset X.509 certificate; IoT policy scoped to that asset's own topic prefix and to a
+  client id equal to its asset id. Per-asset rather than per-fleet so one machine can be
+  revoked — retired, sold, or compromised — without reissuing credentials to every other
+  machine.
 - Certificates are generated per asset and never committed — `.gitignore` excludes `*.pem`,
   `*.key`, `*.crt`, and `certs/`.
+- **Known limitation.** IoT Core generates each certificate's private key and returns it to
+  Terraform, so it is stored in plain text in Terraform state, making state itself a secret.
+  This is acceptable for provisioning a handful of demo assets from one laptop and is not how
+  a real fleet should work: there, each device generates its own key and submits a CSR (or
+  uses fleet provisioning), so the private key never leaves the machine.
+- The IoT rule role may send to exactly the two ingestion queues; its trust policy is
+  constrained by `aws:SourceAccount` and `aws:SourceArn` to prevent cross-account confused
+  deputy use.
+- Ingestion queues use SQS-managed encryption at rest, and each has a dead-letter queue so a
+  poison message is parked for inspection rather than blocking or being discarded.
 - Backend runs in private subnets; RDS is not publicly accessible; secrets come from AWS
   Secrets Manager rather than environment files.
 - IAM roles are least-privilege per component: the backend may publish commands and read its

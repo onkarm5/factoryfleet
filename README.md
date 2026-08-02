@@ -135,8 +135,13 @@ terraform init
 terraform validate
 ```
 
-No AWS resources are defined yet, so nothing is created and nothing is billed. See
-[`infra/terraform/README.md`](infra/terraform/README.md).
+Applying provisions real AWS resources — IoT Core things, certificates and policies, the
+ingestion queues and rules. Costs are small (IoT Core bills per message, SQS requests sit
+inside the free tier, and nothing here runs a server) but not zero, and `terraform destroy`
+between sessions is the cheapest way to work. Read
+[`infra/terraform/README.md`](infra/terraform/README.md) first — it covers the apply steps,
+how to point an agent at IoT Core, the cost breakdown, and the caveat that certificate private
+keys land in Terraform state.
 
 ## Roadmap
 
@@ -144,7 +149,7 @@ No AWS resources are defined yet, so nothing is created and nothing is billed. S
 |---|---|---|
 | 1 | Repository scaffold, specification, backend skeleton, asset registry API, Terraform baseline | ✅ done |
 | 2 | Python agent — sensor plugins, scheduler, local SQLite outbox, MQTT publish to a local broker | ✅ done |
-| 3 | AWS IoT Core — X.509 provisioning, Rules Engine, SQS telemetry queue in Terraform | planned |
+| 3 | AWS IoT Core — X.509 provisioning, Rules Engine, SQS telemetry queue in Terraform | ✅ done |
 | 4 | Backend telemetry ingestion — SQS consumer, RDS Postgres persistence | planned |
 | 5 | Remote commands — REST → IoT publish → agent executes → result → backend command log | planned |
 | 6 | Predictive maintenance — rolling-baseline anomaly detection, offline detection, SNS alerts | planned |

@@ -104,8 +104,10 @@ file rather than an edit to a shared list.
 |---|---|
 | `asset.site_id`, `asset.asset_id` | Address the machine: its topic prefix and registry key |
 | `asset.machine_type` | Validated against the backend's enum at startup |
-| `broker.host`, `broker.port`, `broker.tls` | Broker endpoint. Milestone 3 points this at IoT Core |
+| `broker.host`, `broker.port`, `broker.tls` | Broker endpoint. See [Connecting to AWS IoT Core](#connecting-to-aws-iot-core) |
 | `broker.client_id` | Empty means "use the asset id", which is what IoT Core policies match on |
+| `broker.client_cert_path`, `broker.client_key_path` | This machine's certificate. Required when `tls = true` |
+| `broker.ca_cert_path` | Optional. Blank uses the system trust store, which is correct for IoT Core |
 | `sampling.interval_seconds` | How often every enabled sensor is read |
 | `publishing.interval_seconds` | How often the outbox is drained — slower, so readings batch |
 | `publishing.batch_size` | Most entries per drain, bounding volume on a slow link |
@@ -122,6 +124,54 @@ CNC_MILL, CONVEYOR, HYDRAULIC_PRESS, INJECTION_MOLDER, ROBOT_ARM
 
 Override the log level for one run with `--log-level DEBUG`, or point at a different
 configuration directory with `--config`.
+
+## Connecting to AWS IoT Core
+
+Local Mosquitto and IoT Core are both MQTT brokers, so moving a machine between them is
+configuration, not code — the endpoint, the port, and one boolean. Nothing in the sampling
+loop, the store, or the publisher changes.
+
+Apply the Terraform in [`infra/terraform`](../infra/terraform) to provision the machine, then
+take the generated `[broker]` block:
+
+```bash
+cd infra/terraform && terraform output agent_broker_config
+```
+
+```toml
+[broker]
+host = "a1b2c3d4e5f6g7-ats.iot.ap-south-1.amazonaws.com"
+port = 8883
+tls = true
+keepalive_seconds = 30
+client_id = "PRESS-01"
+client_cert_path = "certs/PRESS-01/certificate.crt"
+client_key_path = "certs/PRESS-01/private.key"
+```
+
+The certificate is how the fleet authenticates a machine — there are no passwords anywhere —
+and it is also what IoT Core's authorisation is written against: the certificate resolves to
+an asset, and that asset's policy permits only its own topics. Both certificate and key are
+therefore required whenever `tls` is on, and the agent checks they exist at startup rather
+than letting the handshake fail later:
+
+```
+$ .venv/bin/python -m factoryfleet_agent
+configuration error: config/agent.toml: [broker] client_cert_path does not exist:
+/Users/you/factoryfleet/agent/certs/PRESS-01/certificate.crt
+```
+
+That check earns its place. paho reports a missing certificate from inside its network thread,
+as a connection that simply never succeeds — and a machine that silently never connects is the
+hardest failure to notice on a monitoring system, which is the exact failure this project
+exists to prevent.
+
+`ca_cert_path` stays blank in normal use. IoT Core's ATS endpoints chain to Amazon Root CA 1,
+already present in any current trust store, so pinning a copy of a public root would only add
+a file that eventually needs rotating. Set it for a private CA.
+
+**Never commit certificates.** `certs/`, `*.pem`, `*.key` and `*.crt` are git-ignored; a leaked
+key lets anything impersonate that machine until the certificate is revoked.
 
 ## Simulated sensors
 
@@ -243,7 +293,6 @@ and ones it did are not.
 
 Commands arrive in milestone 5 — `get_status`, `run_diagnostic`, `reload_config`,
 `restart_agent`, plus per-sensor commands such as `recalibrate`. The sensor base class already
-carries the `COMMANDS` contract and the `asset_state` table already answers "how is this
-machine now" without waiting for the next sample; what is missing is the subscriber and the
-dispatcher. Milestone 3 replaces `transport/broker.py`'s Mosquitto connection with AWS IoT
-Core and per-asset X.509 certificates.
+carries the `COMMANDS` contract, the `asset_state` table already answers "how is this machine
+now" without waiting for the next sample, and each asset's IoT policy already permits
+subscribing to its own command topic; what is missing is the subscriber and the dispatcher.
