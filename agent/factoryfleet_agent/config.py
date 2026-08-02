@@ -59,6 +59,22 @@ class BrokerConfig:
     keepalive_seconds: int
     client_id: str
 
+    #: Trust anchor for the broker's own certificate. Unset means the system trust store,
+    #: which is correct for AWS IoT Core: its ATS endpoints chain to Amazon Root CA 1, already
+    #: present in any current CA bundle. Set it only for a private CA, such as a
+    #: self-hosted broker.
+    ca_cert_path: Path | None = None
+
+    #: This machine's own certificate and key, proving which asset is connecting. Required
+    #: whenever TLS is on, because the fleet authenticates devices by client certificate
+    #: rather than by password.
+    client_cert_path: Path | None = None
+    client_key_path: Path | None = None
+
+    @property
+    def mutual_tls(self) -> bool:
+        return self.client_cert_path is not None and self.client_key_path is not None
+
 
 @dataclass(frozen=True)
 class SensorConfig:
@@ -131,6 +147,7 @@ def load(config_dir: Path) -> AgentConfig:
             broker_table, "keepalive_seconds", agent_file, "broker"
         ),
         client_id=client_id,
+        **_tls_paths(broker_table, agent_file, root),
     )
 
     sampling = _table(document, "sampling", agent_file)
@@ -165,6 +182,56 @@ def load(config_dir: Path) -> AgentConfig:
         log_level=log_level,
         sensors=_load_sensors(config_dir / "sensors"),
     )
+
+
+def _tls_paths(
+    broker_table: Mapping[str, Any], path: Path, root: Path
+) -> dict[str, Path | None]:
+    """Resolves and checks the certificate paths, if TLS is on.
+
+    Checked here rather than left to the TLS handshake because paho reports a missing
+    certificate from inside its network thread, long after startup, as a connection that never
+    succeeds. A machine silently failing to connect is the hardest failure to notice on a
+    monitoring system, so a missing file has to stop the agent at startup with the path in the
+    message.
+    """
+    paths: dict[str, Path | None] = {
+        key: _optional_path(broker_table, key, path, root)
+        for key in ("ca_cert_path", "client_cert_path", "client_key_path")
+    }
+
+    if not broker_table.get("tls"):
+        # Without TLS these are inert. Left in place so switching a machine over to IoT Core
+        # is one boolean rather than a rewrite.
+        return paths
+
+    missing = [
+        key for key in ("client_cert_path", "client_key_path") if paths[key] is None
+    ]
+    if missing:
+        raise ConfigError(
+            f"{path}: [broker] tls is true, so {' and '.join(missing)} must be set — "
+            "the fleet authenticates a machine by its client certificate, not a password"
+        )
+
+    for key, value in paths.items():
+        if value is not None and not value.is_file():
+            raise ConfigError(f"{path}: [broker] {key} does not exist: {value}")
+
+    return paths
+
+
+def _optional_path(
+    table: Mapping[str, Any], key: str, path: Path, root: Path
+) -> Path | None:
+    """Reads a path that may be omitted or blank, resolved against the agent directory."""
+    raw = table.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    if not isinstance(raw, str):
+        raise ConfigError(f"{path}: [broker] {key} must be a string path")
+    resolved = Path(raw.strip())
+    return resolved if resolved.is_absolute() else root / resolved
 
 
 def _load_sensors(sensors_dir: Path) -> tuple[SensorConfig, ...]:

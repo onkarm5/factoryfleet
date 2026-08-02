@@ -84,9 +84,33 @@ class MqttBrokerClient:
             min_delay=int(reconnect_min_seconds), max_delay=int(reconnect_max_seconds)
         )
         if config.tls:
-            # Milestone 3 replaces this with a per-asset X.509 client certificate, which is
-            # what IoT Core authenticates against and what scopes an asset to its own topics.
-            self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+            self._configure_tls(config)
+
+    def _configure_tls(self, config: BrokerConfig) -> None:
+        """Sets up mutual TLS: the broker proves who it is, and so does this machine.
+
+        The client certificate is the whole authentication story for the fleet — there is no
+        password anywhere — and it is also what the broker's authorisation is written against.
+        Against IoT Core the certificate identifies the asset, and the policy attached to it
+        permits only that asset's own topics.
+
+        ``ca_certs=None`` leaves paho with the system trust store, which is the right default
+        for IoT Core: its ATS endpoints chain to Amazon Root CA 1, already present in any
+        current CA bundle. Shipping a pinned copy of a public root would only add a file to
+        rotate.
+        """
+        self._client.tls_set(
+            ca_certs=str(config.ca_cert_path) if config.ca_cert_path else None,
+            certfile=str(config.client_cert_path) if config.client_cert_path else None,
+            keyfile=str(config.client_key_path) if config.client_key_path else None,
+            cert_reqs=ssl.CERT_REQUIRED,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
+        logger.info(
+            "TLS enabled (%s, trust anchor: %s)",
+            "mutual, client certificate presented" if config.mutual_tls else "server only",
+            config.ca_cert_path or "system trust store",
+        )
 
     def start(self) -> None:
         """Begins connecting and starts the network loop. Does not wait for a connection."""

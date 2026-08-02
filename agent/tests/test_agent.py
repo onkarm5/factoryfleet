@@ -198,7 +198,9 @@ def test_queued_telemetry_goes_out_when_the_broker_returns(config):
     broker = FakeBroker(connected=False)
 
     with Agent(config, client=broker) as agent:
-        assert wait_for(lambda: agent.store.pending_count() >= 3)
+        # Cycles rather than pending count: the queue also holds the registration entry, so
+        # waiting on the queue length would not guarantee three telemetry batches exist.
+        assert wait_for(lambda: agent.runner.cycles >= 3)
 
         broker.connected = True
 
@@ -273,8 +275,11 @@ def test_telemetry_buffered_through_an_outage_survives_a_restart(tmp_path):
     offline = FakeBroker(connected=False)
     first = Agent(config, client=offline)
     first.start()
-    assert wait_for(lambda: first.store.pending_count() >= 3)
-    buffered = first.store.pending_count()
+    assert wait_for(lambda: first.runner.cycles >= 3)
+    # Counted by topic, not by queue length, which also holds the registration entry.
+    buffered = sum(
+        1 for entry in first.store.pending(1000) if entry.topic.endswith("/telemetry")
+    )
     first.stop()
 
     assert offline.sent == []

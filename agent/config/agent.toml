@@ -14,15 +14,30 @@ machine_type = "HYDRAULIC_PRESS"
 firmware_version = "2.4.1"
 
 [broker]
-# Local Mosquitto for development. Milestone 3 points this at AWS IoT Core on 8883 with
-# tls = true and a per-asset client certificate.
+# Local Mosquitto for development.
+#
+# To point this machine at AWS IoT Core instead, run the Terraform in infra/terraform and use
+# its `agent_broker_config` output: the endpoint goes in host, port becomes 8883, tls becomes
+# true, and the two certificate paths are filled in. Nothing else about the agent changes.
 host = "localhost"
 port = 1883
 tls = false
 keepalive_seconds = 30
 # MQTT client id. Left empty it defaults to the asset id, which is what IoT Core expects
-# (its policies are written against the client id).
+# (its policies are written against the client id, so that a stolen certificate cannot be
+# used to connect as a different machine).
 client_id = ""
+
+# Certificate paths, used only when tls = true. Relative paths resolve against the agent
+# directory. The client certificate is how the fleet authenticates a machine — there is no
+# password — so both are required with TLS on, and the agent refuses to start if either is
+# missing rather than failing to connect silently later.
+#
+# ca_cert_path is optional and normally left blank: IoT Core's endpoints chain to Amazon Root
+# CA 1, which is already in the system trust store. Set it only for a private CA.
+ca_cert_path = ""
+client_cert_path = ""
+client_key_path = ""
 
 [sampling]
 # How often every enabled sensor is read.
