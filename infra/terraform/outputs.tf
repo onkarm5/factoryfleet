@@ -15,6 +15,17 @@ output "assets" {
   }
 }
 
+output "ingestion_queues" {
+  description = "Queues the backend consumes in milestone 4, and the dead-letter queues to watch."
+  value = {
+    telemetry            = aws_sqs_queue.telemetry.url
+    telemetry_deadletter = aws_sqs_queue.telemetry_deadletter.url
+    registration         = aws_sqs_queue.registration.url
+
+    registration_deadletter = aws_sqs_queue.registration_deadletter.url
+  }
+}
+
 output "agent_broker_config" {
   description = <<-EOT
     Ready-to-paste [broker] section for each asset's agent.toml. Paths are as written by this
